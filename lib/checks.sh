@@ -638,20 +638,20 @@ check_logging_config() {
 # Usage: check_failed_logins
 check_failed_logins() {
     print_subheader "Failed Login Analysis"
-    
+
     local count=0
     local auth_log=""
-    
+
     if [[ -f /var/log/auth.log ]]; then
         auth_log="/var/log/auth.log"
     elif [[ -f /var/log/secure ]]; then
         auth_log="/var/log/secure"
     fi
-    
+
     if [[ -n "$auth_log" && -r "$auth_log" ]]; then
         local failed_count
         failed_count=$(grep -c "Failed password\|authentication failure" "$auth_log" 2>/dev/null || echo "0")
-        
+
         if [[ "$failed_count" -gt 100 ]]; then
             add_finding "$SEV_MEDIUM" "accounts" \
                 "High number of failed login attempts: $failed_count" \
@@ -663,7 +663,40 @@ check_failed_logins() {
     else
         log_debug "Auth log not found or not readable"
     fi
-    
+
+    return $count
+}
+
+# Check for TODO markers in codebase
+# Usage: check_todo_markers
+check_todo_markers() {
+    print_subheader "TODO Markers"
+
+    local count=0
+    local search_dirs=("${SCRIPT_DIR}" "${SCRIPT_DIR}/lib" "${SCRIPT_DIR}/tests")
+    local patterns=("TODO" "FIXME" "XXX" "HACK" "BUG" "NOTE:")
+
+    for dir in "${search_dirs[@]}"; do
+        if [[ -d "$dir" ]]; then
+            while IFS= read -r line; do
+                [[ -n "$line" ]] || continue
+                local file="${line%%:*}"
+                local content="${line#*:}"
+
+                add_finding "$SEV_LOW" "code_quality" \
+                    "TODO marker found: $file" \
+                    "$content"
+                ((count++))
+            done < <(grep -rnE "(TODO|FIXME|XXX|HACK|BUG|NOTE:)" "$dir" --include="*.sh" --include="*.md" 2>/dev/null | grep -v "check_todo_markers" | head -50)
+        fi
+    done
+
+    if [[ $count -eq 0 ]]; then
+        log_success "No TODO markers found in codebase"
+    else
+        log_warn "Found $count TODO marker(s) in codebase"
+    fi
+
     return $count
 }
 
@@ -709,7 +742,8 @@ run_all_checks() {
     # Logging
     check_logging_config
     check_failed_logins
-    
+    check_todo_markers
+
     # Software
     check_software_versions
     
@@ -729,4 +763,5 @@ export -f check_empty_passwords check_uid_zero_accounts check_password_aging
 export -f check_listening_services check_insecure_services
 export -f check_kernel_params check_ssh_config check_cron_jobs
 export -f check_logging_config check_failed_logins check_software_versions
+export -f check_todo_markers
 export -f run_all_checks

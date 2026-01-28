@@ -164,6 +164,7 @@ CONFIGURATION
 LOGGING
   logging            - Verify logging configuration
   failed_logins      - Analyze failed login attempts
+  todo_markers       - Check for TODO markers in codebase
 
 SOFTWARE
   versions           - Check for pending updates
@@ -344,6 +345,9 @@ run_specific_check() {
             ;;
         failed_logins|failed-logins)
             check_failed_logins
+            ;;
+        todo_markers|todo-markers)
+            check_todo_markers
             ;;
         versions)
             check_software_versions
