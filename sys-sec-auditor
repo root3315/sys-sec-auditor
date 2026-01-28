@@ -1,0 +1,438 @@
+#!/usr/bin/env bash
+#
+# sys-sec-auditor - System Security Audit Tool
+# A comprehensive bash-based security scanner for Linux systems
+#
+# Usage: sys-sec-auditor [OPTIONS]
+#
+# Options:
+#   -h, --help           Show this help message
+#   -v, --version        Show version information
+#   -d, --debug          Enable debug output
+#   -q, --quiet          Suppress non-essential output
+#   -r, --report FORMAT  Generate report (text|json|csv|html)
+#   -o, --output FILE    Output file for report
+#   -c, --check NAME     Run specific check only
+#   -l, --list           List available checks
+#   --no-color           Disable colored output
+#   --root               Require root privileges
+#
+
+set -o pipefail
+
+# Version information
+readonly VERSION="1.0.0"
+readonly SCRIPT_NAME="sys-sec-auditor"
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source library files
+LIB_DIR="${SCRIPT_DIR}/lib"
+source "${LIB_DIR}/utils.sh"
+source "${LIB_DIR}/checks.sh"
+source "${LIB_DIR}/reporting.sh"
+
+# Global configuration
+DEBUG_ENABLED=false
+QUIET_MODE=false
+NO_COLOR=false
+REQUIRE_ROOT=false
+REPORT_FORMAT=""
+OUTPUT_FILE=""
+SPECIFIC_CHECK=""
+
+# Exit codes
+readonly EXIT_SUCCESS=0
+readonly EXIT_ERROR=1
+readonly EXIT_ROOT_REQUIRED=2
+readonly EXIT_INVALID_OPTION=3
+
+# ============================================================================
+# HELP AND VERSION
+# ============================================================================
+
+show_version() {
+    echo "${SCRIPT_NAME} version ${VERSION}"
+}
+
+show_help() {
+    cat << EOF
+${SCRIPT_NAME} - System Security Audit Tool v${VERSION}
+
+USAGE:
+    ${SCRIPT_NAME} [OPTIONS]
+
+OPTIONS:
+    -h, --help           Show this help message and exit
+    -v, --version        Show version information and exit
+    -d, --debug          Enable debug output for troubleshooting
+    -q, --quiet          Suppress non-essential output
+    -r, --report FORMAT  Generate report in specified format
+                         Supported formats: text, json, csv, html
+    -o, --output FILE    Specify output file for report
+    -c, --check NAME     Run only the specified check
+    -l, --list           List all available security checks
+    --no-color           Disable colored output (for scripts/logs)
+    --root               Require root privileges to run
+
+EXAMPLES:
+    # Run full security audit
+    ${SCRIPT_NAME}
+
+    # Run with debug output
+    ${SCRIPT_NAME} --debug
+
+    # Generate JSON report
+    ${SCRIPT_NAME} --report json --output /tmp/audit.json
+
+    # Run specific check only
+    ${SCRIPT_NAME} --check ssh_config
+
+    # List all available checks
+    ${SCRIPT_NAME} --list
+
+SECURITY CHECKS:
+    File Permissions:
+        - world_writable      Check for world-writable files
+        - suid_sgid           Check SUID/SGID binaries
+        - critical_perms      Check critical file permissions
+
+    User Accounts:
+        - empty_passwords     Check for empty passwords
+        - uid_zero            Check for UID 0 accounts
+        - password_aging      Check password expiration
+        - locked_accounts     List locked accounts
+
+    Services:
+        - listening           Check listening services
+        - insecure_services   Check for insecure services
+
+    Configuration:
+        - kernel_params       Check kernel security parameters
+        - ssh_config          Check SSH configuration
+        - cron_jobs           Check cron job security
+
+    Logging:
+        - logging             Check logging configuration
+        - failed_logins       Analyze failed login attempts
+
+    Software:
+        - versions            Check software versions
+
+EXIT CODES:
+    0  Success
+    1  General error
+    2  Root privileges required
+    3  Invalid option
+
+REPORTS:
+    Reports are saved to /tmp/sys-sec-auditor-reports/ by default.
+    Use --output to specify a custom location.
+
+EOF
+}
+
+# ============================================================================
+# CHECK LISTING
+# ============================================================================
+
+list_checks() {
+    print_header "Available Security Checks"
+    
+    cat << EOF
+FILE PERMISSIONS
+  world_writable     - Check for world-writable files in sensitive directories
+  suid_sgid          - Check for non-standard SUID/SGID binaries
+  critical_perms     - Verify permissions on critical system files
+
+USER ACCOUNTS
+  empty_passwords    - Detect accounts with empty passwords
+  uid_zero           - Find non-root accounts with UID 0
+  password_aging     - Check password expiration policies
+  locked_accounts    - List locked/disabled accounts
+
+SERVICES
+  listening          - Identify services bound to all interfaces
+  insecure_services  - Detect insecure services (telnet, FTP, etc.)
+
+CONFIGURATION
+  kernel_params      - Verify kernel security parameters
+  ssh_config         - Audit SSH daemon configuration
+  cron_jobs          - Check cron job security
+
+LOGGING
+  logging            - Verify logging configuration
+  failed_logins      - Analyze failed login attempts
+
+SOFTWARE
+  versions           - Check for pending updates
+
+EOF
+    
+    log_info "Use --check <name> to run a specific check"
+}
+
+# ============================================================================
+# ARGUMENT PARSING
+# ============================================================================
+
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                show_help
+                exit $EXIT_SUCCESS
+                ;;
+            -v|--version)
+                show_version
+                exit $EXIT_SUCCESS
+                ;;
+            -d|--debug)
+                DEBUG_ENABLED=true
+                export DEBUG_ENABLED
+                shift
+                ;;
+            -q|--quiet)
+                QUIET_MODE=true
+                shift
+                ;;
+            -r|--report)
+                if [[ -z "$2" || "$2" == -* ]]; then
+                    log_error "Option --report requires a format argument"
+                    exit $EXIT_INVALID_OPTION
+                fi
+                REPORT_FORMAT="$2"
+                shift 2
+                ;;
+            -o|--output)
+                if [[ -z "$2" || "$2" == -* ]]; then
+                    log_error "Option --output requires a file argument"
+                    exit $EXIT_INVALID_OPTION
+                fi
+                OUTPUT_FILE="$2"
+                shift 2
+                ;;
+            -c|--check)
+                if [[ -z "$2" || "$2" == -* ]]; then
+                    log_error "Option --check requires a check name"
+                    exit $EXIT_INVALID_OPTION
+                fi
+                SPECIFIC_CHECK="$2"
+                shift 2
+                ;;
+            -l|--list)
+                list_checks
+                exit $EXIT_SUCCESS
+                ;;
+            --no-color)
+                NO_COLOR=true
+                # Disable colors by overriding color variables
+                COLOR_RESET=""
+                COLOR_RED=""
+                COLOR_GREEN=""
+                COLOR_YELLOW=""
+                COLOR_BLUE=""
+                COLOR_CYAN=""
+                COLOR_BOLD=""
+                shift
+                ;;
+            --root)
+                REQUIRE_ROOT=true
+                shift
+                ;;
+            -*)
+                log_error "Unknown option: $1"
+                echo "Use --help for usage information"
+                exit $EXIT_INVALID_OPTION
+                ;;
+            *)
+                log_error "Unexpected argument: $1"
+                exit $EXIT_INVALID_OPTION
+                ;;
+        esac
+    done
+}
+
+# ============================================================================
+# VALIDATION
+# ============================================================================
+
+validate_environment() {
+    # Check if running on Linux
+    if ! is_linux; then
+        log_warn "This tool is designed for Linux systems"
+        log_warn "Some checks may not work correctly on $(uname)"
+    fi
+    
+    # Check root requirement
+    if [[ "$REQUIRE_ROOT" == "true" ]] && ! check_root; then
+        log_error "This command requires root privileges"
+        log_error "Run with sudo or as root"
+        exit $EXIT_ROOT_REQUIRED
+    fi
+    
+    # Warn if not root
+    if ! check_root; then
+        log_warn "Running without root privileges - some checks may be limited"
+    fi
+    
+    # Validate report format if specified
+    if [[ -n "$REPORT_FORMAT" ]]; then
+        case "$REPORT_FORMAT" in
+            text|txt|json|csv|html)
+                ;;
+            *)
+                log_error "Unknown report format: $REPORT_FORMAT"
+                log_info "Supported formats: text, json, csv, html"
+                exit $EXIT_INVALID_OPTION
+                ;;
+        esac
+    fi
+    
+    log_debug "Environment validation complete"
+}
+
+# ============================================================================
+# SPECIFIC CHECK RUNNER
+# ============================================================================
+
+run_specific_check() {
+    local check_name="$1"
+    
+    log_info "Running check: $check_name"
+    
+    case "$check_name" in
+        world_writable|world-writable)
+            check_world_writable_files
+            ;;
+        suid_sgid|suid-sgid)
+            check_suid_sgid_binaries
+            ;;
+        critical_perms|critical-perms)
+            check_critical_file_permissions
+            ;;
+        empty_passwords|empty-passwords)
+            check_empty_passwords
+            ;;
+        uid_zero|uid-zero)
+            check_uid_zero_accounts
+            ;;
+        password_aging|password-aging)
+            check_password_aging
+            ;;
+        locked_accounts|locked-accounts)
+            check_locked_accounts
+            ;;
+        listening)
+            check_listening_services
+            ;;
+        insecure_services|insecure-services)
+            check_insecure_services
+            ;;
+        kernel_params|kernel-params)
+            check_kernel_params
+            ;;
+        ssh_config|ssh-config)
+            check_ssh_config
+            ;;
+        cron_jobs|cron-jobs)
+            check_cron_jobs
+            ;;
+        logging)
+            check_logging_config
+            ;;
+        failed_logins|failed-logins)
+            check_failed_logins
+            ;;
+        versions)
+            check_software_versions
+            ;;
+        all)
+            run_all_checks
+            ;;
+        *)
+            log_error "Unknown check: $check_name"
+            log_info "Use --list to see available checks"
+            return 1
+            ;;
+    esac
+}
+
+# ============================================================================
+# MAIN EXECUTION
+# ============================================================================
+
+main() {
+    # Parse command line arguments
+    parse_arguments "$@"
+    
+    # Validate environment
+    validate_environment
+    
+    # Quiet mode - redirect non-essential output
+    if [[ "$QUIET_MODE" == "true" ]]; then
+        exec 3>&1
+        exec 1>/dev/null 2>&1
+    fi
+    
+    # Run audit
+    if [[ -n "$SPECIFIC_CHECK" ]]; then
+        # Run specific check
+        run_specific_check "$SPECIFIC_CHECK"
+    else
+        # Run full audit
+        run_all_checks
+    fi
+    
+    # Generate report if requested
+    if [[ -n "$REPORT_FORMAT" ]]; then
+        print_subheader "Generating Report"
+        
+        local report_file
+        if [[ -n "$OUTPUT_FILE" ]]; then
+            report_file=$(generate_report "$REPORT_FORMAT" "$OUTPUT_FILE")
+        else
+            report_file=$(generate_report "$REPORT_FORMAT")
+        fi
+        
+        if [[ "$QUIET_MODE" == "true" ]]; then
+            exec 1>&3 2>&1
+            exec 3>&-
+        fi
+        
+        log_info "Report saved to: $report_file"
+    fi
+    
+    # Restore stdout if quiet mode
+    if [[ "$QUIET_MODE" == "true" ]]; then
+        exec 1>&3 2>&1
+        exec 3>&-
+    fi
+    
+    # Print findings summary
+    if [[ -z "$REPORT_FORMAT" ]]; then
+        print_findings
+    fi
+    
+    # Calculate exit code based on findings
+    local critical_count
+    critical_count=$(count_by_severity "CRITICAL")
+    local high_count
+    high_count=$(count_by_severity "HIGH")
+    
+    if [[ $critical_count -gt 0 ]]; then
+        exit $EXIT_ERROR
+    elif [[ $high_count -gt 0 ]]; then
+        exit $EXIT_SUCCESS
+    fi
+    
+    exit $EXIT_SUCCESS
+}
+
+# ============================================================================
+# ENTRY POINT
+# ============================================================================
+
+# Run main function with all arguments
+main "$@"
