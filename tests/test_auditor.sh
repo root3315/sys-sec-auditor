@@ -391,7 +391,7 @@ test_reporting_module() {
     source "${PROJECT_DIR}/lib/utils.sh"
     source "${PROJECT_DIR}/lib/checks.sh"
     source "${PROJECT_DIR}/lib/reporting.sh"
-    
+
     local test_name="Reporting: init_report_dir"
     init_report_dir
     if [[ -d "/tmp/sys-sec-auditor-reports" ]]; then
@@ -399,11 +399,147 @@ test_reporting_module() {
     else
         test_result fail "$test_name" "Report directory not created"
     fi
-    
+
     test_name="Reporting: generate_report_filename"
     local filename
     filename=$(generate_report_filename "json")
     assert_contains "$filename" ".json" "$test_name"
+}
+
+test_config_functions() {
+    # Source utils for config testing
+    source "${PROJECT_DIR}/lib/utils.sh"
+
+    local test_name="Config: init_config"
+    init_config
+    test_result pass "$test_name" "Config initialized"
+
+    test_name="Config: get_config returns default"
+    local value
+    value=$(get_config "DEBUG_ENABLED")
+    assert_eq "false" "$value" "$test_name"
+
+    test_name="Config: set_config"
+    set_config "TEST_KEY" "test_value"
+    value=$(get_config "TEST_KEY")
+    assert_eq "test_value" "$value" "$test_name"
+
+    test_name="Config: has_config"
+    if has_config "TEST_KEY"; then
+        test_result pass "$test_name"
+    else
+        test_result fail "$test_name" "Config key should exist"
+    fi
+
+    test_name="Config: has_config for non-existent key"
+    if ! has_config "NON_EXISTENT_KEY"; then
+        test_result pass "$test_name"
+    else
+        test_result fail "$test_name" "Config key should not exist"
+    fi
+
+    test_name="Config: reset_config"
+    reset_config
+    if ! has_config "TEST_KEY"; then
+        test_result pass "$test_name" "Config reset successfully"
+    else
+        test_result fail "$test_name" "Config should be reset"
+    fi
+}
+
+test_config_file_loading() {
+    # Source utils for config testing
+    source "${PROJECT_DIR}/lib/utils.sh"
+
+    local test_name="Config: load_config with non-existent file"
+    init_config
+    if ! load_config "/nonexistent/path/config.conf" 2>/dev/null; then
+        test_result pass "$test_name"
+    else
+        test_result fail "$test_name" "Should fail for non-existent file"
+    fi
+
+    test_name="Config: load_config from temp file"
+    local temp_config
+    temp_config=$(mktemp)
+    cat > "$temp_config" << EOF
+# Test config file
+DEBUG_ENABLED=true
+QUIET_MODE=false
+REPORT_FORMAT=json
+TEST_CUSTOM=value123
+EOF
+
+    init_config
+    if load_config "$temp_config"; then
+        test_result pass "$test_name"
+    else
+        test_result fail "$test_name" "Failed to load config file"
+    fi
+
+    test_name="Config: loaded values"
+    local value
+    value=$(get_config "DEBUG_ENABLED")
+    assert_eq "true" "$value" "$test_name"
+
+    test_name="Config: loaded custom value"
+    value=$(get_config "TEST_CUSTOM")
+    assert_eq "value123" "$value" "$test_name"
+
+    rm -f "$temp_config"
+}
+
+test_config_check_exclusion() {
+    # Source modules for testing
+    source "${PROJECT_DIR}/lib/utils.sh"
+    source "${PROJECT_DIR}/lib/checks.sh"
+
+    local test_name="Config: should_skip_check without exclusions"
+    init_config
+    if ! should_skip_check "test_check"; then
+        test_result pass "$test_name"
+    else
+        test_result fail "$test_name" "Check should not be skipped"
+    fi
+
+    test_name="Config: should_skip_check with exclusion"
+    set_config "EXCLUDE_CHECKS" "test_check,another_check"
+    if should_skip_check "test_check"; then
+        test_result pass "$test_name"
+    else
+        test_result fail "$test_name" "Check should be skipped"
+    fi
+
+    test_name="Config: should_skip_check not excluded"
+    if ! should_skip_check "other_check"; then
+        test_result pass "$test_name"
+    else
+        test_result fail "$test_name" "Check should not be skipped"
+    fi
+
+    test_name="Config: should_skip_check with include whitelist"
+    init_config
+    set_config "INCLUDE_CHECKS" "only_this_check"
+    if should_skip_check "other_check"; then
+        test_result pass "$test_name"
+    else
+        test_result fail "$test_name" "Check should be skipped (not in whitelist)"
+    fi
+
+    test_name="Config: should_skip_check in whitelist"
+    if ! should_skip_check "only_this_check"; then
+        test_result pass "$test_name"
+    else
+        test_result fail "$test_name" "Check should not be skipped (in whitelist)"
+    fi
+}
+
+test_config_main_script() {
+    local test_name="Config: --config option in help"
+    local output
+    output=$("${PROJECT_DIR}/sys-sec-auditor" --help 2>&1)
+
+    assert_contains "$output" "--config" "$test_name"
 }
 
 test_file_structure() {
@@ -505,7 +641,15 @@ run_all_tests() {
     test_checks_module
     test_reporting_module
     echo ""
-    
+
+    # Config tests
+    echo "Configuration Tests:"
+    test_config_functions
+    test_config_file_loading
+    test_config_check_exclusion
+    test_config_main_script
+    echo ""
+
     # Summary
     echo "========================================"
     echo "  Test Summary"

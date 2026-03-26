@@ -27,6 +27,43 @@ declare -a FINDING_SEVERITIES=()
 declare -a FINDING_CATEGORIES=()
 declare -a FINDING_DETAILS=()
 
+# Check if a check should be skipped based on config
+# Usage: should_skip_check <check_name>
+should_skip_check() {
+    local check_name="$1"
+
+    # Check INCLUDE_CHECKS first (whitelist)
+    local include_checks
+    include_checks="$(get_config INCLUDE_CHECKS 2>/dev/null)"
+    if [[ -n "$include_checks" ]]; then
+        IFS=',' read -ra included <<< "$include_checks"
+        for inc in "${included[@]}"; do
+            inc=$(echo "$inc" | tr -d ' ')
+            [[ "$inc" == "$check_name" || "$inc" == "all" ]] && return 1
+        done
+        return 0
+    fi
+
+    # Check EXCLUDE_CHECKS (blacklist)
+    local exclude_checks
+    exclude_checks="$(get_config EXCLUDE_CHECKS 2>/dev/null)"
+    if [[ -n "$exclude_checks" ]]; then
+        IFS=',' read -ra excluded <<< "$exclude_checks"
+        for exc in "${excluded[@]}"; do
+            exc=$(echo "$exc" | tr -d ' ')
+            [[ "$exc" == "$check_name" || "$exc" == "all" ]] && return 0
+        done
+    fi
+
+    return 1
+}
+
+# Get max findings limit from config
+# Usage: get_max_findings
+get_max_findings() {
+    get_config MAX_FINDINGS 1000
+}
+
 # Add a finding to the results
 # Usage: add_finding <severity> <category> <description> [details]
 add_finding() {
@@ -708,45 +745,75 @@ check_todo_markers() {
 # Usage: run_all_checks
 run_all_checks() {
     reset_findings
-    
+
     print_header "System Security Audit"
-    
+
     log_info "Hostname: $(get_hostname)"
     log_info "OS: $(get_os_name)"
     log_info "Kernel: $(get_kernel_version)"
     log_info "Audit started: $(get_timestamp)"
-    
+
     if ! check_root; then
         log_warn "Not running as root - some checks may be limited"
     fi
-    
+
     # File permission checks
-    check_world_writable_files
-    check_suid_sgid_binaries
-    check_critical_file_permissions
-    
+    if ! should_skip_check "world_writable"; then
+        check_world_writable_files
+    fi
+    if ! should_skip_check "suid_sgid"; then
+        check_suid_sgid_binaries
+    fi
+    if ! should_skip_check "critical_perms"; then
+        check_critical_file_permissions
+    fi
+
     # User account checks
-    check_uid_zero_accounts
-    check_password_aging
-    check_locked_accounts
-    
+    if ! should_skip_check "uid_zero"; then
+        check_uid_zero_accounts
+    fi
+    if ! should_skip_check "password_aging"; then
+        check_password_aging
+    fi
+    if ! should_skip_check "locked_accounts"; then
+        check_locked_accounts
+    fi
+
     # Service checks
-    check_listening_services
-    check_insecure_services
-    
+    if ! should_skip_check "listening"; then
+        check_listening_services
+    fi
+    if ! should_skip_check "insecure_services"; then
+        check_insecure_services
+    fi
+
     # System configuration
-    check_kernel_params
-    check_ssh_config
-    check_cron_jobs
-    
+    if ! should_skip_check "kernel_params"; then
+        check_kernel_params
+    fi
+    if ! should_skip_check "ssh_config"; then
+        check_ssh_config
+    fi
+    if ! should_skip_check "cron_jobs"; then
+        check_cron_jobs
+    fi
+
     # Logging
-    check_logging_config
-    check_failed_logins
-    check_todo_markers
+    if ! should_skip_check "logging"; then
+        check_logging_config
+    fi
+    if ! should_skip_check "failed_logins"; then
+        check_failed_logins
+    fi
+    if ! should_skip_check "todo_markers"; then
+        check_todo_markers
+    fi
 
     # Software
-    check_software_versions
-    
+    if ! should_skip_check "versions"; then
+        check_software_versions
+    fi
+
     print_header "Audit Summary"
     log_info "Total findings: $(get_total_findings)"
     log_info "Critical: $(count_by_severity "$SEV_CRITICAL")"
@@ -758,6 +825,7 @@ run_all_checks() {
 
 # Export functions for use by other scripts
 export -f add_finding reset_findings count_by_severity get_total_findings
+export -f should_skip_check get_max_findings
 export -f check_world_writable_files check_suid_sgid_binaries check_critical_file_permissions
 export -f check_empty_passwords check_uid_zero_accounts check_password_aging
 export -f check_listening_services check_insecure_services
