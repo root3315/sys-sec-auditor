@@ -57,6 +57,7 @@ Options:
   -o, --output FILE    Specify output file for report
   -c, --check NAME     Run specific check only
   -l, --list           List available checks
+  --config FILE        Load configuration from file
   --no-color           Disable colored output
   --root               Require root privileges
 ```
@@ -78,6 +79,82 @@ Options:
 
 # Generate HTML report
 ./sys-sec-auditor --report html --output security_report.html
+
+# Load configuration from file
+./sys-sec-auditor --config /etc/sys-sec-auditor.conf
+```
+
+## Configuration File
+
+The tool supports loading settings from a configuration file using the `--config` option.
+
+### Config File Format
+
+Configuration files use a simple `KEY=VALUE` format:
+
+```bash
+# Lines starting with # are comments
+DEBUG_ENABLED=true
+QUIET_MODE=false
+NO_COLOR=false
+REPORT_FORMAT=json
+OUTPUT_FILE=/var/log/audit.json
+SPECIFIC_CHECK=ssh_config
+REPORT_DIR=/var/reports
+
+# Exclude specific checks (comma-separated)
+EXCLUDE_CHECKS=todo_markers,versions
+
+# Include only specific checks (whitelist mode)
+INCLUDE_CHECKS=ssh_config,kernel_params,logging
+```
+
+### Available Configuration Keys
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `DEBUG_ENABLED` | Enable debug output | `false` |
+| `QUIET_MODE` | Suppress non-essential output | `false` |
+| `NO_COLOR` | Disable colored output | `false` |
+| `REQUIRE_ROOT` | Require root privileges | `false` |
+| `REPORT_FORMAT` | Report format (text\|json\|csv\|html) | - |
+| `OUTPUT_FILE` | Output file path for report | - |
+| `SPECIFIC_CHECK` | Run only this check | - |
+| `REPORT_DIR` | Directory for report output | `/tmp/sys-sec-auditor-reports` |
+| `EXCLUDE_CHECKS` | Comma-separated list of checks to skip | - |
+| `INCLUDE_CHECKS` | Comma-separated whitelist of checks to run | - |
+
+### Config File Precedence
+
+Command-line options take precedence over configuration file settings. This allows you to:
+
+1. Set default values in a config file
+2. Override specific settings via command-line when needed
+
+### Example Config File
+
+```bash
+# /etc/sys-sec-auditor.conf
+# Default configuration for sys-sec-auditor
+
+# Output settings
+REPORT_FORMAT=json
+REPORT_DIR=/var/log/audits
+
+# Exclude noisy checks for automated runs
+EXCLUDE_CHECKS=todo_markers
+
+# Enable quiet mode for cron jobs
+QUIET_MODE=true
+```
+
+Usage:
+```bash
+# Run with default config
+./sys-sec-auditor --config /etc/sys-sec-auditor.conf
+
+# Override config with command-line option
+./sys-sec-auditor --config /etc/sys-sec-auditor.conf --report html
 ```
 
 ## Security Checks

@@ -14,6 +14,7 @@
 #   -o, --output FILE    Output file for report
 #   -c, --check NAME     Run specific check only
 #   -l, --list           List available checks
+#   --config FILE        Load configuration from file
 #   --no-color           Disable colored output
 #   --root               Require root privileges
 #
@@ -41,6 +42,7 @@ REQUIRE_ROOT=false
 REPORT_FORMAT=""
 OUTPUT_FILE=""
 SPECIFIC_CHECK=""
+CONFIG_FILE=""
 
 # Exit codes
 readonly EXIT_SUCCESS=0
@@ -73,6 +75,7 @@ OPTIONS:
     -o, --output FILE    Specify output file for report
     -c, --check NAME     Run only the specified check
     -l, --list           List all available security checks
+    --config FILE        Load configuration from file
     --no-color           Disable colored output (for scripts/logs)
     --root               Require root privileges to run
 
@@ -91,6 +94,9 @@ EXAMPLES:
 
     # List all available checks
     ${SCRIPT_NAME} --list
+
+    # Load configuration from file
+    ${SCRIPT_NAME} --config /etc/sys-sec-auditor.conf
 
 SECURITY CHECKS:
     File Permissions:
@@ -242,6 +248,14 @@ parse_arguments() {
                 REQUIRE_ROOT=true
                 shift
                 ;;
+            --config)
+                if [[ -z "$2" || "$2" == -* ]]; then
+                    log_error "Option --config requires a file argument"
+                    exit $EXIT_INVALID_OPTION
+                fi
+                CONFIG_FILE="$2"
+                shift 2
+                ;;
             -*)
                 log_error "Unknown option: $1"
                 echo "Use --help for usage information"
@@ -370,7 +384,28 @@ run_specific_check() {
 main() {
     # Parse command line arguments
     parse_arguments "$@"
-    
+
+    # Initialize configuration with defaults
+    init_config
+
+    # Load config file if specified
+    if [[ -n "$CONFIG_FILE" ]]; then
+        if ! load_config "$CONFIG_FILE"; then
+            exit $EXIT_ERROR
+        fi
+
+        # Apply config values to global variables
+        [[ -n "$(get_config DEBUG_ENABLED)" ]] && DEBUG_ENABLED="$(get_config DEBUG_ENABLED)"
+        [[ -n "$(get_config QUIET_MODE)" ]] && QUIET_MODE="$(get_config QUIET_MODE)"
+        [[ -n "$(get_config NO_COLOR)" ]] && NO_COLOR="$(get_config NO_COLOR)"
+        [[ -n "$(get_config REQUIRE_ROOT)" ]] && REQUIRE_ROOT="$(get_config REQUIRE_ROOT)"
+        [[ -n "$(get_config REPORT_FORMAT)" ]] && REPORT_FORMAT="$(get_config REPORT_FORMAT)"
+        [[ -n "$(get_config OUTPUT_FILE)" ]] && OUTPUT_FILE="$(get_config OUTPUT_FILE)"
+        [[ -n "$(get_config SPECIFIC_CHECK)" ]] && SPECIFIC_CHECK="$(get_config SPECIFIC_CHECK)"
+
+        log_debug "Configuration loaded from: $CONFIG_FILE"
+    fi
+
     # Validate environment
     validate_environment
     

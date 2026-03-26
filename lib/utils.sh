@@ -319,3 +319,137 @@ unique_array() {
     local -n arr="$1"
     IFS=$'\n' arr=($(printf '%s\n' "${arr[@]}" | sort -u)); unset IFS
 }
+
+# ============================================================================
+# CONFIGURATION FILE SUPPORT
+# ============================================================================
+
+# Default configuration values
+declare -A CONFIG_DEFAULTS=(
+    ["DEBUG_ENABLED"]="false"
+    ["QUIET_MODE"]="false"
+    ["NO_COLOR"]="false"
+    ["REQUIRE_ROOT"]="false"
+    ["REPORT_FORMAT"]=""
+    ["OUTPUT_FILE"]=""
+    ["SPECIFIC_CHECK"]=""
+    ["REPORT_DIR"]="/tmp/sys-sec-auditor-reports"
+    ["LOG_LEVEL"]="INFO"
+    ["MAX_FINDINGS"]="1000"
+    ["EXCLUDE_CHECKS"]=""
+    ["INCLUDE_CHECKS"]=""
+)
+
+# Global config array
+declare -A CONFIG=()
+
+# Load configuration from file
+# Usage: load_config <config_file>
+# Returns: 0 on success, 1 on error
+load_config() {
+    local config_file="$1"
+
+    if [[ ! -f "$config_file" ]]; then
+        log_error "Config file not found: $config_file"
+        return 1
+    fi
+
+    if [[ ! -r "$config_file" ]]; then
+        log_error "Config file not readable: $config_file"
+        return 1
+    fi
+
+    log_debug "Loading config from: $config_file"
+
+    local line_num=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        ((line_num++))
+
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+        # Remove leading/trailing whitespace
+        line=$(trim "$line")
+
+        # Parse KEY=VALUE format
+        if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            local key="${BASH_REMATCH[1]}"
+            local value="${BASH_REMATCH[2]}"
+
+            # Remove surrounding quotes if present
+            value=$(echo "$value" | sed -e 's/^["'"'"']//' -e 's/["'"'"']$//')
+
+            CONFIG["$key"]="$value"
+            log_debug "Config: $key = $value"
+        else
+            log_warn "Invalid config line $line_num: $line"
+        fi
+    done < "$config_file"
+
+    log_debug "Config loaded successfully"
+    return 0
+}
+
+# Get configuration value with default fallback
+# Usage: get_config <key> [default]
+get_config() {
+    local key="$1"
+    local default="${2:-}"
+
+    # Check if key exists in CONFIG array
+    if [[ -v CONFIG["$key"] ]]; then
+        echo "${CONFIG[$key]}"
+    # Check if key exists in CONFIG_DEFAULTS array
+    elif [[ -v CONFIG_DEFAULTS["$key"] ]]; then
+        echo "${CONFIG_DEFAULTS[$key]}"
+    else
+        echo "$default"
+    fi
+}
+
+# Set configuration value
+# Usage: set_config <key> <value>
+set_config() {
+    local key="$1"
+    local value="$2"
+    CONFIG["$key"]="$value"
+}
+
+# Check if config key exists
+# Usage: has_config <key>
+has_config() {
+    local key="$1"
+    [[ -n "${CONFIG[$key]+isset}" ]]
+}
+
+# Get all config keys
+# Usage: get_config_keys
+get_config_keys() {
+    for key in "${!CONFIG[@]}"; do
+        echo "$key"
+    done
+}
+
+# Export config to environment variables
+# Usage: export_config
+export_config() {
+    for key in "${!CONFIG[@]}"; do
+        export "$key"="${CONFIG[$key]}"
+    done
+}
+
+# Reset configuration to defaults
+# Usage: reset_config
+reset_config() {
+    CONFIG=()
+    for key in "${!CONFIG_DEFAULTS[@]}"; do
+        CONFIG["$key"]="${CONFIG_DEFAULTS[$key]}"
+    done
+}
+
+# Initialize config with defaults
+# Usage: init_config
+init_config() {
+    reset_config
+    log_debug "Configuration initialized with defaults"
+}

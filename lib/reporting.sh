@@ -14,8 +14,14 @@ readonly _SYS_SEC_AUDITOR_REPORTING_LOADED=1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/utils.sh"
 
-# Report output directory (can be overridden)
-REPORT_DIR="${REPORT_DIR:-/tmp/sys-sec-auditor-reports}"
+# Report output directory (can be overridden by config)
+if [[ -n "${CONFIG[REPORT_DIR]+isset}" ]]; then
+    REPORT_DIR="${CONFIG[REPORT_DIR]}"
+elif [[ -n "${REPORT_DIR:-}" ]]; then
+    REPORT_DIR="${REPORT_DIR}"
+else
+    REPORT_DIR="/tmp/sys-sec-auditor-reports"
+fi
 REPORT_FORMAT="${REPORT_FORMAT:-text}"
 
 # Ensure report directory exists
